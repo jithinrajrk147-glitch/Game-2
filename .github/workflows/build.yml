@@ -1,0 +1,109 @@
+# FILE: .github/workflows/build.yml
+
+name: Build XOX WiFi APK
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Create package.json
+        run: |
+
+          cat > package.json << 'EOF'
+          {
+            "name":"xoxwifi",
+            "version":"1.0.0",
+            "private":true,
+            "dependencies":{
+              "@capacitor/core":"^6.1.2",
+              "@capacitor/android":"^6.1.2",
+              "cordova-plugin-websocket-server":"^1.5.0"
+            },
+            "devDependencies":{
+              "@capacitor/cli":"^6.1.2",
+              "typescript":"^5.4.5"
+            }
+          }
+          EOF
+
+      - name: Create capacitor config
+        run: |
+
+          cat > capacitor.config.ts << 'EOF'
+          import { CapacitorConfig } from '@capacitor/cli';
+
+          const config: CapacitorConfig = {
+            appId: 'com.xox.wifi',
+            appName: 'XOX WiFi',
+            webDir: 'www',
+
+            server: {
+              cleartext: true,
+              androidScheme: 'https',
+              allowNavigation: ['*']
+            },
+
+            android: {
+              allowMixedContent: true
+            }
+          };
+
+          export default config;
+          EOF
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Add Android
+        run: npx cap add android
+
+      - name: Add Plugin
+        run: |
+          npx cap sync android
+
+      - name: Add Permissions
+        run: |
+
+          sed -i '/<application/i\
+          <uses-permission android:name="android.permission.INTERNET" />\
+          <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\
+          <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\
+          <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />' \
+          android/app/src/main/AndroidManifest.xml
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: XOX-WiFi-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
