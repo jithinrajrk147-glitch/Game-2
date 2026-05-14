@@ -1,0 +1,520 @@
+<!-- FILE: www/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<title>XOX WiFi</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    font-family:Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+}
+
+body{
+    background:#0d1117;
+    color:white;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    padding:20px;
+}
+
+h1{
+    color:#58a6ff;
+    margin-bottom:15px;
+    font-size:30px;
+}
+
+#lobby{
+    position:fixed;
+    inset:0;
+    background:#0d1117;
+    z-index:999;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+}
+
+#lobby button{
+    width:260px;
+    padding:16px;
+    margin:10px;
+    border:none;
+    border-radius:10px;
+    background:#238636;
+    color:white;
+    font-size:18px;
+    font-weight:bold;
+}
+
+#lobby button:active{
+    transform:scale(.98);
+}
+
+#lobby input{
+    width:260px;
+    padding:15px;
+    border-radius:10px;
+    border:2px solid #30363d;
+    background:#161b22;
+    color:white;
+    font-size:18px;
+    text-align:center;
+}
+
+#ipText{
+    margin-top:15px;
+    text-align:center;
+    color:#58a6ff;
+    font-size:14px;
+    padding:0 20px;
+    word-break:break-word;
+}
+
+#status{
+    margin-bottom:20px;
+    font-size:22px;
+    color:#f0883e;
+    font-weight:bold;
+    min-height:30px;
+}
+
+#board{
+    display:grid;
+    grid-template-columns:repeat(3,100px);
+    grid-template-rows:repeat(3,100px);
+    gap:8px;
+    background:#161b22;
+    padding:8px;
+    border-radius:14px;
+}
+
+.cell{
+    width:100px;
+    height:100px;
+    background:#21262d;
+    border:2px solid #30363d;
+    border-radius:10px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:62px;
+    font-weight:bold;
+}
+
+.cell.x{
+    color:#ff4d4d;
+}
+
+.cell.o{
+    color:#58a6ff;
+}
+
+.cell.disabled{
+    opacity:.6;
+}
+
+#info{
+    margin-top:15px;
+    color:#8b949e;
+    font-size:16px;
+}
+
+#youare{
+    color:#f0883e;
+    font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<div id="lobby">
+    <h1>XOX WIFI</h1>
+
+    <div style="margin-bottom:20px;color:#00ff88">
+        2 Phones • Offline • Hotspot
+    </div>
+
+    <button id="hostBtn">HOST GAME</button>
+
+    <div style="margin:10px">OR</div>
+
+    <input id="joinIP" placeholder="Host IP">
+
+    <button id="joinBtn">JOIN GAME</button>
+
+    <div id="ipText"></div>
+</div>
+
+<h1>XOX GAME</h1>
+
+<div id="status">Waiting...</div>
+
+<div id="board">
+    <div class="cell" data-i="0"></div>
+    <div class="cell" data-i="1"></div>
+    <div class="cell" data-i="2"></div>
+    <div class="cell" data-i="3"></div>
+    <div class="cell" data-i="4"></div>
+    <div class="cell" data-i="5"></div>
+    <div class="cell" data-i="6"></div>
+    <div class="cell" data-i="7"></div>
+    <div class="cell" data-i="8"></div>
+</div>
+
+<div id="info">
+    You are: <span id="youare">-</span>
+</div>
+
+<script>
+
+document.addEventListener("deviceready", initApp, false);
+
+function initApp(){
+
+let board = ["","","","","","","","",""];
+let currentPlayer = "X";
+let gameActive = false;
+let myPlayer = "";
+let isHost = false;
+let ws = null;
+let clients = [];
+
+const statusDiv = document.getElementById("status");
+const cells = document.querySelectorAll(".cell");
+const youareDiv = document.getElementById("youare");
+const ipText = document.getElementById("ipText");
+
+const wins = [
+    [0,1,2],
+    [3,4,5],
+    [6,7,8],
+    [0,3,6],
+    [1,4,7],
+    [2,5,8],
+    [0,4,8],
+    [2,4,6]
+];
+
+function updateBoard(){
+
+    cells.forEach((cell,i)=>{
+
+        cell.textContent = board[i];
+
+        cell.className = "cell";
+
+        if(board[i]){
+            cell.classList.add(board[i].toLowerCase());
+        }
+
+        if(
+            !gameActive ||
+            currentPlayer !== myPlayer ||
+            board[i] !== ""
+        ){
+            cell.classList.add("disabled");
+        }
+
+    });
+
+}
+
+function checkWin(player){
+
+    return wins.some(combo=>{
+        return combo.every(i=>board[i]===player);
+    });
+
+}
+
+function broadcast(data){
+
+    const msg = JSON.stringify(data);
+
+    clients.forEach(c=>{
+        try{
+            c.send(msg);
+        }catch(e){}
+    });
+
+}
+
+function endGame(text){
+
+    statusDiv.textContent = text;
+
+    gameActive = false;
+
+    updateBoard();
+
+    setTimeout(resetGame,3000);
+
+}
+
+function resetGame(){
+
+    board = ["","","","","","","","",""];
+
+    currentPlayer = "X";
+
+    gameActive = true;
+
+    statusDiv.textContent = "Player X Turn";
+
+    updateBoard();
+
+    if(isHost){
+        broadcast({
+            t:"reset"
+        });
+    }
+
+}
+
+function applyMove(i,player){
+
+    if(board[i] !== "") return;
+
+    board[i] = player;
+
+    updateBoard();
+
+    if(checkWin(player)){
+        endGame(`Player ${player} Wins!`);
+        return;
+    }
+
+    if(board.every(c=>c!=="")){
+        endGame("Draw!");
+        return;
+    }
+
+    currentPlayer = player === "X" ? "O" : "X";
+
+    statusDiv.textContent = `Player ${currentPlayer} Turn`;
+
+    updateBoard();
+
+}
+
+function handleClick(e){
+
+    if(!gameActive) return;
+
+    if(currentPlayer !== myPlayer) return;
+
+    const i = parseInt(e.target.dataset.i);
+
+    if(board[i] !== "") return;
+
+    if(isHost){
+
+        applyMove(i,myPlayer);
+
+        broadcast({
+            t:"move",
+            i:i,
+            p:myPlayer
+        });
+
+    }else{
+
+        ws.send(JSON.stringify({
+            t:"move",
+            i:i
+        }));
+
+    }
+
+}
+
+function handleMessage(msg){
+
+    const data = JSON.parse(msg);
+
+    if(data.t === "start"){
+
+        myPlayer = data.player;
+
+        youareDiv.textContent = myPlayer;
+
+        document.getElementById("lobby").style.display = "none";
+
+        gameActive = true;
+
+        statusDiv.textContent = "Player X Turn";
+
+        updateBoard();
+
+    }
+
+    if(data.t === "move"){
+
+        applyMove(data.i,data.p);
+
+    }
+
+    if(data.t === "reset"){
+
+        board = ["","","","","","","","",""];
+
+        currentPlayer = "X";
+
+        gameActive = true;
+
+        statusDiv.textContent = "Player X Turn";
+
+        updateBoard();
+
+    }
+
+}
+
+async function startHost(){
+
+    isHost = true;
+
+    myPlayer = "X";
+
+    youareDiv.textContent = "X";
+
+    ipText.innerHTML = "Starting server...";
+
+    try{
+
+        await cordova.plugins.wsserver.start(8080,{
+
+            onStart:(addr)=>{
+
+                ipText.innerHTML =
+                `Friend joins with:<br><b>${addr.address}:8080</b>`;
+
+            },
+
+            onOpen:(conn)=>{
+
+                clients.push(conn);
+
+                conn.send(JSON.stringify({
+                    t:"start",
+                    player:"O"
+                }));
+
+                document.getElementById("lobby").style.display = "none";
+
+                gameActive = true;
+
+                statusDiv.textContent = "Player X Turn";
+
+                updateBoard();
+
+            },
+
+            onMessage:(conn,msg)=>{
+
+                const data = JSON.parse(msg);
+
+                if(data.t === "move"){
+
+                    if(currentPlayer !== "O") return;
+
+                    if(board[data.i] !== "") return;
+
+                    applyMove(data.i,"O");
+
+                    broadcast({
+                        t:"move",
+                        i:data.i,
+                        p:"O"
+                    });
+
+                }
+
+            },
+
+            onClose:()=>{
+
+                statusDiv.textContent = "Player disconnected";
+
+                gameActive = false;
+
+            }
+
+        });
+
+    }catch(e){
+
+        ipText.innerHTML = "Error: " + e.message;
+
+    }
+
+}
+
+function joinGame(){
+
+    let hostIP =
+    document.getElementById("joinIP").value.trim();
+
+    if(!hostIP){
+        alert("Enter host IP");
+        return;
+    }
+
+    ipText.innerHTML = "Connecting...";
+
+    ws = new WebSocket(`ws://${hostIP}:8080`);
+
+    ws.onopen = ()=>{
+
+        ipText.innerHTML = "Connected";
+
+    };
+
+    ws.onmessage = (e)=>{
+
+        handleMessage(e.data);
+
+    };
+
+    ws.onerror = ()=>{
+
+        ipText.innerHTML =
+        "Connection failed";
+
+    };
+
+    ws.onclose = ()=>{
+
+        statusDiv.textContent =
+        "Disconnected";
+
+        gameActive = false;
+
+    };
+
+}
+
+cells.forEach(c=>{
+    c.onclick = handleClick;
+});
+
+document.getElementById("hostBtn").onclick = startHost;
+document.getElementById("joinBtn").onclick = joinGame;
+
+}
+</script>
+
+</body>
+      </html>
